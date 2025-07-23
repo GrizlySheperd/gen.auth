@@ -1,21 +1,18 @@
-# 🚀 Phoenix LiveView Multi-Role Authentication with `phx.gen.auth`
+# Phoenix LiveView Multi-Role Authentication Guide
 
-This guide outlines how to build a Phoenix LiveView project with two distinct roles: `User` and `Admin`, using `phx.gen.auth` for authentication and role-based access.
-
----
-
-## 🎯 Goals
-
-* ✅ Use `phx.gen.auth` for both `User` and `Admin` authentication
-* ✅ Restrict access:
-
-  * `Users` can only access user pages
-  * `Admins` can access both admin and user pages
-* ✅ Use LiveView for interactive dashboards
+This document walks through setting up a Phoenix LiveView project with two separate roles: `User` and `Admin`. Each role has its own authentication flow, and access control is enforced so that only Admins can access Admin pages, while both Admins and Users can access User pages.
 
 ---
 
-## 🧱 1. Create a New Phoenix Project
+## Overview
+
+* Authentication using `phx.gen.auth` for both roles
+* Role-based access control to LiveView pages
+* Layout switching based on role
+
+---
+
+## 1. Create the Project
 
 ```bash
 mix phx.new multi_auth_demo --live
@@ -25,35 +22,31 @@ mix deps.get
 
 ---
 
-## 🔐 2. Generate Authentication for Users
+## 2. Add Authentication for Users
 
 ```bash
 mix phx.gen.auth Accounts User users
 mix ecto.migrate
 ```
 
-* Context: `Accounts`
-* Schema: `User`
-* Table: `users`
+This generates LiveView-friendly registration, login, settings, and password reset for users.
 
 ---
 
-## 🔐 3. Generate Authentication for Admins
+## 3. Add Authentication for Admins
 
 ```bash
 mix phx.gen.auth Admins Admin admins
 mix ecto.migrate
 ```
 
-* Context: `Admins`
-* Schema: `Admin`
-* Table: `admins`
+This creates a separate admin authentication context with its own schema and table.
 
 ---
 
-## 🛠 4. Define Auth Pipelines in Router
+## 4. Define Role-Based Pipelines
 
-Edit `lib/multi_auth_demo_web/router.ex`:
+In `lib/multi_auth_demo_web/router.ex`:
 
 ```elixir
 pipeline :user_browser do
@@ -79,22 +72,19 @@ end
 
 ---
 
-## 🌐 5. Define Routes
+## 5. Define Routes by Role
 
 ```elixir
-# User-only routes
 scope "/", MultiAuthDemoWeb do
   pipe_through [:user_browser, :require_authenticated_user]
   live "/user/dashboard", UserDashboardLive
 end
 
-# Admin-only routes
 scope "/admin", MultiAuthDemoWeb do
   pipe_through [:admin_browser, :require_authenticated_admin]
   live "/dashboard", AdminDashboardLive
 end
 
-# Admin accessing user dashboard
 scope "/admin", MultiAuthDemoWeb do
   pipe_through [:admin_browser, :maybe_authenticate_admin]
   live "/user/dashboard", UserDashboardLive
@@ -103,20 +93,20 @@ end
 
 ---
 
-## ⚡️ 6. Create LiveViews
+## 6. Create LiveViews
 
 ```bash
 mix phx.gen.live Web UserDashboard dashboards --no-schema
 mix phx.gen.live Web AdminDashboard dashboards --no-schema
 ```
 
-Edit the generated files under `lib/multi_auth_demo_web/live/` to add content.
+Edit the generated files under `lib/multi_auth_demo_web/live/`.
 
 ---
 
-## 🔒 7. Enforce Access Control in LiveViews
+## 7. Secure the Mount Lifecycle
 
-### `UserDashboardLive`
+In `UserDashboardLive`:
 
 ```elixir
 def mount(_params, _session, socket) do
@@ -128,7 +118,7 @@ def mount(_params, _session, socket) do
 end
 ```
 
-### `AdminDashboardLive`
+In `AdminDashboardLive`:
 
 ```elixir
 def mount(_params, _session, socket) do
@@ -142,18 +132,20 @@ end
 
 ---
 
-## 🎨 8. Optional: Add Role-Based Layouts
+## 8. Custom Layouts for Roles
+
+Create these files:
 
 * `lib/multi_auth_demo_web/layouts/user.html.heex`
 * `lib/multi_auth_demo_web/layouts/admin.html.heex`
 
-These are configured via `put_root_layout` in router pipelines.
+These are automatically chosen based on the router pipeline used.
 
 ---
 
-## 🧩 9. Admin Access to User Pages
+## 9. Admin Access to User Pages
 
-In `AdminAuth`, add this plug:
+In `AdminAuth`, define:
 
 ```elixir
 def maybe_authenticate_admin(conn, _opts) do
@@ -161,25 +153,19 @@ def maybe_authenticate_admin(conn, _opts) do
 end
 ```
 
-Then apply this in admin scopes that need access to user areas.
+This allows access to user areas for signed-in admins.
 
 ---
 
-## 🧪 10. Access Matrix Summary
+## 10. Access Permissions Summary
 
-| Route              | User | Admin |
-| ------------------ | ---- | ----- |
-| `/user/dashboard`  | ✅    | ✅     |
-| `/admin/dashboard` | ❌    | ✅     |
+| Route              | User Access | Admin Access |
+| ------------------ | ----------- | ------------ |
+| `/user/dashboard`  | Yes         | Yes          |
+| `/admin/dashboard` | No          | Yes          |
 
 ---
 
-## ✅ Conclusion
+## Conclusion
 
-You now have a Phoenix LiveView application with:
-
-* Independent `User` and `Admin` authentication
-* Proper access controls
-* Role-aware dashboards using LiveView
-
-Feel free to enhance this with dashboards, permissions, or API support!
+This setup allows for a clean separation between regular users and administrative users while still allowing shared access where appropriate. It also fully leverages Phoenix LiveView and `phx.gen.auth` to keep your code maintainable and secure.
