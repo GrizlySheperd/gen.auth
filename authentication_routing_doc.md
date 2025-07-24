@@ -221,3 +221,8 @@ Phoenix.Router.NoRouteError at GET /admin
 > 💬 Questions or feedback? PRs welcome!\
 > ✨ Happy coding with Phoenix + LiveView!
 
+## 11.Changes To Admin can Access User, Change the top one to the bottom one in page_live.ex
+        if assigns.current_user && assigns.current_user.role == "user" do
+
+        if assigns.current_user && (assigns.current_user.role == "user" or assigns.current_user.role == "admin") do
+
