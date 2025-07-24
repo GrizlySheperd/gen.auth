@@ -1,171 +1,171 @@
-# Phoenix LiveView Multi-Role Authentication Guide
+🔐 Authentication & Role-Based Routing in Phoenix (LiveView, Phoenix 1.7+)
+Overview
+This guide explains how to:
 
-This document walks through setting up a Phoenix LiveView project with two separate roles: `User` and `Admin`. Each role has its own authentication flow, and access control is enforced so that only Admins can access Admin pages, while both Admins and Users can access User pages.
+✅ Add authentication to your Phoenix app
 
----
+✅ Add a role column to the users table
 
-## Overview
+✅ Implement role-based routing for /admin and /user pages using LiveView
 
-* Authentication using `phx.gen.auth` for both roles
-* Role-based access control to LiveView pages
-* Layout switching based on role
+✅ Avoid common pitfalls (especially with Phoenix 1.7+ routing)
 
----
+1. 🧪 Generate Authentication
+Run the following to scaffold authentication:
 
-## 1. Create the Project
-
-```bash
-mix phx.new multi_auth_demo --live
-cd multi_auth_demo
+mix phx.gen.auth Accounts User users --live
 mix deps.get
-```
-
----
-
-## 2. Add Authentication for Users
-
-```bash
-mix phx.gen.auth Accounts User users
 mix ecto.migrate
-```
+2. 🏗️ Add a role Column to Users
+Generate a migration:
 
-This generates LiveView-friendly registration, login, settings, and password reset for users.
+mix ecto.gen.migration add_role_to_users
+Edit the generated file in priv/repo/migrations/:
 
----
-
-## 3. Add Authentication for Admins
-
-```bash
-mix phx.gen.auth Admins Admin admins
-mix ecto.migrate
-```
-
-This creates a separate admin authentication context with its own schema and table.
-
----
-
-## 4. Define Role-Based Pipelines
-
-In `lib/multi_auth_demo_web/router.ex`:
-
-```elixir
-pipeline :user_browser do
-  plug :accepts, ["html"]
-  plug :fetch_session
-  plug :fetch_live_flash
-  plug :put_root_layout, {MultiAuthDemoWeb.Layouts, :user}
-  plug :protect_from_forgery
-  plug :put_secure_browser_headers
-  plug MultiAuthDemoWeb.UserAuth
-end
-
-pipeline :admin_browser do
-  plug :accepts, ["html"]
-  plug :fetch_session
-  plug :fetch_live_flash
-  plug :put_root_layout, {MultiAuthDemoWeb.Layouts, :admin}
-  plug :protect_from_forgery
-  plug :put_secure_browser_headers
-  plug MultiAuthDemoWeb.AdminAuth
-end
-```
-
----
-
-## 5. Define Routes by Role
-
-```elixir
-scope "/", MultiAuthDemoWeb do
-  pipe_through [:user_browser, :require_authenticated_user]
-  live "/user/dashboard", UserDashboardLive
-end
-
-scope "/admin", MultiAuthDemoWeb do
-  pipe_through [:admin_browser, :require_authenticated_admin]
-  live "/dashboard", AdminDashboardLive
-end
-
-scope "/admin", MultiAuthDemoWeb do
-  pipe_through [:admin_browser, :maybe_authenticate_admin]
-  live "/user/dashboard", UserDashboardLive
-end
-```
-
----
-
-## 6. Create LiveViews
-
-```bash
-mix phx.gen.live Web UserDashboard dashboards --no-schema
-mix phx.gen.live Web AdminDashboard dashboards --no-schema
-```
-
-Edit the generated files under `lib/multi_auth_demo_web/live/`.
-
----
-
-## 7. Secure the Mount Lifecycle
-
-In `UserDashboardLive`:
-
-```elixir
-def mount(_params, _session, socket) do
-  if socket.assigns[:current_user] || socket.assigns[:current_admin] do
-    {:ok, socket}
-  else
-    {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/users/log_in")}
+def change do
+  alter table(:users) do
+    add :role, :string, default: "user", null: false
   end
 end
-```
+Then run:
 
-In `AdminDashboardLive`:
+mix ecto.migrate
+3. 🧬 Update the User Schema
+Update lib/your_app/accounts/user.ex:
 
-```elixir
-def mount(_params, _session, socket) do
-  if socket.assigns[:current_admin] do
-    {:ok, socket}
-  else
-    {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/admin/log_in")}
+Add to the schema:
+
+schema "users" do
+  field :role, :string
+  ...
+end
+Modify registration_changeset/3:
+
+def registration_changeset(user, attrs, opts \\ []) do
+  user
+  |> cast(attrs, [:email, :password, :role])
+  |> validate_required([:email, :password])
+  |> put_change(:role, Map.get(attrs, "role", "user"))
+  |> validate_email(opts)
+  |> validate_password(opts)
+end
+4. 🔀 Add Role-Based Redirects on Login
+In lib/your_app_web/controllers/user_session_controller.ex, add:
+
+defp redirect_user_by_role(conn, user) do
+  case user.role do
+    "admin" -> redirect(conn, to: ~p"/admin")
+    "user" -> redirect(conn, to: ~p"/user")
+    _ -> redirect(conn, to: ~p"/")
   end
 end
-```
+Use it in the create/3 function.
 
----
+5. 🧭 Define LiveView Routes (Correctly!)
+⚠️ Important
+All LiveView routes must be inside a live_session block.
 
-## 8. Custom Layouts for Roles
+✅ Correct usage for Phoenix 1.7+:
 
-Create these files:
+scope "/", YourAppWeb do
+  pipe_through [:browser, :require_authenticated_user]
 
-* `lib/multi_auth_demo_web/layouts/user.html.heex`
-* `lib/multi_auth_demo_web/layouts/admin.html.heex`
+  live_session :require_authenticated_user,
+    on_mount: [{YourAppWeb.UserAuth, :ensure_authenticated}] do
 
-These are automatically chosen based on the router pipeline used.
+    live "/admin", PageLive, :admin
+    live "/user", PageLive, :user
 
----
-
-## 9. Admin Access to User Pages
-
-In `AdminAuth`, define:
-
-```elixir
-def maybe_authenticate_admin(conn, _opts) do
-  MultiAuthDemoWeb.AdminAuth.fetch_current_admin(conn, [])
+    live "/users/settings", UserSettingsLive, :edit
+    live "/users/settings/confirm_email/:token", UserSettingsLive, :confirm_email
+  end
 end
-```
+❌ Do NOT define LiveView routes outside live_session — you'll get Phoenix.Router.NoRouteError.
 
-This allows access to user areas for signed-in admins.
+6. 🧠 Implement the Page LiveView
+Create lib/your_app_web/live/page_live.ex:
 
----
+defmodule YourAppWeb.PageLive do
+  use YourAppWeb, :live_view
 
-## 10. Access Permissions Summary
+  on_mount {YourAppWeb.UserAuth, :mount_current_user}
 
-| Route              | User Access | Admin Access |
-| ------------------ | ----------- | ------------ |
-| `/user/dashboard`  | Yes         | Yes          |
-| `/admin/dashboard` | No          | Yes          |
+  def mount(_params, _session, socket), do: {:ok, socket}
 
----
+  def render(assigns) do
+    case assigns.live_action do
+      :admin ->
+        if assigns.current_user && assigns.current_user.role == "admin" do
+          ~H"<h1>You are in the admin page</h1>"
+        else
+          ~H"<h1>Access denied</h1>"
+        end
 
-## Conclusion
+      :user ->
+        if assigns.current_user && assigns.current_user.role == "user" do
+          ~H"<h1>You are in the user page</h1>"
+        else
+          ~H"<h1>Access denied</h1>"
+        end
 
-This setup allows for a clean separation between regular users and administrative users while still allowing shared access where appropriate. It also fully leverages Phoenix LiveView and `phx.gen.auth` to keep your code maintainable and secure.
+      :home ->
+        ~H"""
+        <h1>Welcome to Documentation App</h1>
+        <p>Please login or register to continue.</p>
+        """
+    end
+  end
+end
+7. 👤 Seed an Admin User
+In priv/repo/seeds.exs:
+
+alias YourApp.Repo
+alias YourApp.Accounts.User
+
+unless Repo.get_by(User, email: "admin@gmail.com") do
+  params = %{
+    email: "admin@gmail.com",
+    password: "eikaarylin1234"
+  }
+
+  %User{}
+  |> User.registration_changeset(params)
+  |> Ecto.Changeset.change(%{
+    role: "admin",
+    confirmed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+  })
+  |> Repo.insert!()
+
+  IO.puts("✅ Admin user created!")
+end
+Then run:
+
+mix run priv/repo/seeds.exs
+8. 🛠️ Troubleshooting: NoRouteError for LiveView
+Error:
+
+Phoenix.Router.NoRouteError at GET /admin
+no route found for GET /admin (YourAppWeb.Router)
+✅ Solution:
+
+Ensure LiveView routes are inside a live_session
+
+Restart Phoenix server after adding new routes or files
+
+9. ✅ Final Checklist
+ Live routes are inside a live_session
+
+ on_mount {YourAppWeb.UserAuth, :mount_current_user} is used
+
+ Role-based redirects and access control are working
+
+ Server restarted after code changes
+
+10. 💡 Tips
+Restart your server after adding routes, migrations, or live components
+
+Always test login/logout flow after schema changes
+
+Use the seeded admin user to test /admin access
+
+Avoid {:halt, socket} in LiveView; use push_redirect/2 or redirect/2 with {:ok, socket}
